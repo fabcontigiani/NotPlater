@@ -10,6 +10,27 @@ local INTERRUPTED = INTERRUPTED
 local slen = string.len
 local ssub = string.sub
 
+-- Maps nameplate unit tokens (e.g. "nameplate5") to their NotPlater frames.
+-- Used for non-target cast bar support via the awesome_wotlk patch.
+local castBarTokenFrames = {}
+
+-- Pattern matching nameplate unit tokens provided by the awesome_wotlk patch.
+local NAMEPLATE_UNIT_PATTERN = "^nameplate%d+$"
+
+local function TrackNameplateUnitCast(frame, unit)
+	if unit and unit:match(NAMEPLATE_UNIT_PATTERN) then
+		frame.castBar.unitToken = unit
+		castBarTokenFrames[unit] = frame
+	end
+end
+
+local function UntrackNameplateUnitCast(frame)
+	if frame.castBar.unitToken then
+		castBarTokenFrames[frame.castBar.unitToken] = nil
+		frame.castBar.unitToken = nil
+	end
+end
+
 function NotPlater:SetCastBarNameText(frame, text)
 	local configMaxLength = NotPlater.db.profile.castBar.spellNameText.general.maxLetters
 	if text and slen(text) > configMaxLength then
@@ -21,7 +42,7 @@ end
 
 function NotPlater:CastBarOnUpdate(elapsed)
     local castBarConfig = NotPlater.db.profile.castBar
-	if not NotPlater:IsTarget(self:GetParent()) then
+	if not self.unitToken and not NotPlater:IsTarget(self:GetParent()) then
 		self.casting = nil
 		self.channeling = nil
 		self:Hide()
@@ -108,6 +129,7 @@ function NotPlater:CastBarOnCast(frame, event, unit)
 
 		frame.castBar.casting = true
 		frame.castBar.channeling = nil
+		TrackNameplateUnitCast(frame, unit)
 
 		frame.castBar:Show()
 	elseif event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_CHANNEL_STOP" then
@@ -122,6 +144,7 @@ function NotPlater:CastBarOnCast(frame, event, unit)
 			else
 				frame.castBar.channeling = nil
 			end
+			UntrackNameplateUnitCast(frame)
 
 			frame.castBar:Hide()
 		end
@@ -136,6 +159,7 @@ function NotPlater:CastBarOnCast(frame, event, unit)
 			end
 			frame.castBar.casting = nil
 			frame.castBar.channeling = nil
+			UntrackNameplateUnitCast(frame)
 		end
 	elseif event == "UNIT_SPELLCAST_DELAYED" then
 		if frame:IsShown() then
@@ -154,6 +178,7 @@ function NotPlater:CastBarOnCast(frame, event, unit)
 			if not frame.castBar.casting then
 				frame.castBar.casting = true
 				frame.castBar.channeling = nil
+				TrackNameplateUnitCast(frame, unit)
 			end
 		end
 	elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
@@ -175,6 +200,7 @@ function NotPlater:CastBarOnCast(frame, event, unit)
 
 		frame.castBar.casting = nil
 		frame.castBar.channeling = true
+		TrackNameplateUnitCast(frame, unit)
 
 		frame.castBar:Show()
 	elseif event == "UNIT_SPELLCAST_CHANNEL_UPDATE" then
@@ -221,6 +247,7 @@ function NotPlater:CastBarOnShow(frame)
 	local castFrame = frame.castBar
 	castFrame.casting = nil
 	castFrame.channeling = nil
+	UntrackNameplateUnitCast(frame)
 	NotPlater:CastCheck(frame)
 	-- Tried to make it reappear, but this does not really work since you can't track whether something was interrupted
 	--if castFrame.casting or castFrame.channeling then
@@ -272,10 +299,46 @@ function NotPlater:RegisterCastBarEvents(frame)
 	if not frame.npCastBarEventsHooked then
 		frame.npCastBarEventsHooked = true
 		frame:SetScript("OnEvent", function(self, event, unit)
+			if event == "NAME_PLATE_UNIT_ADDED" then
+				-- awesome_wotlk patch: a nameplate unit appeared; check if it is casting
+				if C_NamePlate and C_NamePlate.GetNamePlateForUnit then
+					local namePlate = C_NamePlate.GetNamePlateForUnit(unit)
+					if namePlate and NotPlater.frames[namePlate] then
+						NotPlater:CastBarOnCast(namePlate, nil, unit)
+					end
+				end
+				return
+			elseif event == "NAME_PLATE_UNIT_REMOVED" then
+				-- awesome_wotlk patch: a nameplate unit disappeared; clean up its cast bar state
+				local trackedFrame = castBarTokenFrames[unit]
+				if trackedFrame and trackedFrame.castBar then
+					UntrackNameplateUnitCast(trackedFrame)
+					trackedFrame.castBar.casting = nil
+					trackedFrame.castBar.channeling = nil
+				end
+				return
+			end
+
 			if not unit or not UnitExists(unit) then
 				return
 			end
-			local matchedFrame = NotPlater:GetMatchedFrameForUnit(unit)
+
+			local matchedFrame
+			if unit:match(NAMEPLATE_UNIT_PATTERN) then
+				-- awesome_wotlk patch: use the C_NamePlate API for a direct frame lookup
+				if C_NamePlate and C_NamePlate.GetNamePlateForUnit then
+					local namePlate = C_NamePlate.GetNamePlateForUnit(unit)
+					if namePlate and NotPlater.frames[namePlate] then
+						matchedFrame = namePlate
+					end
+				end
+				if not matchedFrame then
+					matchedFrame = NotPlater:GetMatchedFrameForUnit(unit)
+				end
+			else
+				matchedFrame = NotPlater:GetMatchedFrameForUnit(unit)
+			end
+
 			if matchedFrame then
 				NotPlater:CastBarOnCast(matchedFrame, event, unit)
 			end
@@ -289,6 +352,8 @@ function NotPlater:RegisterCastBarEvents(frame)
 	frame:RegisterEvent("UNIT_SPELLCAST_START")
 	frame:RegisterEvent("UNIT_SPELLCAST_STOP")
 	frame:RegisterEvent("UNIT_SPELLCAST_FAILED")
+	frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
+	frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 end
 
 function NotPlater:UnregisterCastBarEvents(frame)
@@ -300,4 +365,6 @@ function NotPlater:UnregisterCastBarEvents(frame)
 	frame:UnregisterEvent("UNIT_SPELLCAST_START")
 	frame:UnregisterEvent("UNIT_SPELLCAST_STOP")
 	frame:UnregisterEvent("UNIT_SPELLCAST_FAILED")
+	frame:UnregisterEvent("NAME_PLATE_UNIT_ADDED")
+	frame:UnregisterEvent("NAME_PLATE_UNIT_REMOVED")
 end
