@@ -718,6 +718,14 @@ function ConfigPrototypes:LoadConfigPrototypes()
         name = L["Color"],
         hasAlpha = true,
     }
+    ConfigPrototypes.CastBar.general.args.showNonTargetCastBars = {
+        order = 2,
+        type = "toggle",
+        width = "double",
+        name = L["Show Non-Target Cast Bars"],
+        desc = L["Shows cast bars on all visible nameplates, not just the current target. Requires the awesome_wotlk patch."],
+        disabled = function() return not NotPlater.hasNamePlateAPI end,
+    }
     ConfigPrototypes.CastBar.position = ConfigPrototypes:GetGeneralisedPositionConfig()
     ConfigPrototypes.SpellTimeText = ConfigPrototypes:GetGeneralisedColorFontConfig()
     ConfigPrototypes.SpellTimeText.general.args.displayType = {

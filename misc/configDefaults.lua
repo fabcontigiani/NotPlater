@@ -335,6 +335,7 @@ function NotPlater:LoadDefaultConfig()
                         enable = true,
                         texture = "NotPlater Default",
                         color = {0.765, 0.525, 0, 1},
+                        showNonTargetCastBars = true,
                     },
                     background = {
                         enable = true,

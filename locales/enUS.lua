@@ -410,4 +410,6 @@ NotPlaterLocals = {
 	["Activate Selected Template"] = "Activate Selected Template",
 	["No templates are defined in template_data.lua."] = "No templates are defined in template_data.lua.",
 	["Select a template to activate."] = "Select a template to activate.",
+	["Show Non-Target Cast Bars"] = "Show Non-Target Cast Bars",
+	["Shows cast bars on all visible nameplates, not just the current target. Requires the awesome_wotlk patch."] = "Shows cast bars on all visible nameplates, not just the current target. Requires the awesome_wotlk patch.",
 }

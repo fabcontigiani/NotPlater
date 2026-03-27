@@ -9,6 +9,10 @@ local FAILED = FAILED
 local INTERRUPTED = INTERRUPTED
 local slen = string.len
 local ssub = string.sub
+local wipe = wipe
+
+-- Maps nameplate unit token (e.g. "nameplate1") -> NotPlater frame
+local nameplateCastUnits = {}
 
 function NotPlater:SetCastBarNameText(frame, text)
 	local configMaxLength = NotPlater.db.profile.castBar.spellNameText.general.maxLetters
@@ -21,7 +25,10 @@ end
 
 function NotPlater:CastBarOnUpdate(elapsed)
     local castBarConfig = NotPlater.db.profile.castBar
-	if not NotPlater:IsTarget(self:GetParent()) then
+	local parentFrame = self:GetParent()
+	local isTarget = NotPlater:IsTarget(parentFrame)
+	local npCastUnit = parentFrame and parentFrame.npCastUnit
+	if not isTarget and not npCastUnit then
 		self.casting = nil
 		self.channeling = nil
 		self:Hide()
@@ -198,9 +205,10 @@ function NotPlater:CastCheck(frame)
 	if frame.castBar.casting or frame.castBar.channeling then
 		frame.castBar:Show()
 	else
-		self:CastBarOnCast(frame, "UNIT_SPELLCAST_START", "target")
+		local unit = frame.npCastUnit or "target"
+		self:CastBarOnCast(frame, "UNIT_SPELLCAST_START", unit)
 		if not frame.castBar.casting then
-			self:CastBarOnCast(frame, "UNIT_SPELLCAST_CHANNEL_START", "target")
+			self:CastBarOnCast(frame, "UNIT_SPELLCAST_CHANNEL_START", unit)
 		end
 	end
 end
@@ -300,4 +308,90 @@ function NotPlater:UnregisterCastBarEvents(frame)
 	frame:UnregisterEvent("UNIT_SPELLCAST_START")
 	frame:UnregisterEvent("UNIT_SPELLCAST_STOP")
 	frame:UnregisterEvent("UNIT_SPELLCAST_FAILED")
+end
+
+---------------------------------------------------------------------
+-- Non-target cast bar support (awesome_wotlk C_NamePlate API)
+---------------------------------------------------------------------
+local npNameplateCastFrame = CreateFrame("Frame")
+
+function NotPlater:CastBarOnNamePlateAdded(unit)
+	if not C_NamePlate or not C_NamePlate.GetNamePlateForUnit then
+		return
+	end
+	local namePlate = C_NamePlate.GetNamePlateForUnit(unit)
+	if not namePlate then
+		return
+	end
+	local frame = self:GetFrameForNamePlate(namePlate)
+	if not frame then
+		return
+	end
+	frame.npCastUnit = unit
+	nameplateCastUnits[unit] = frame
+	-- Check if the unit is currently casting
+	if frame.castBar then
+		if UnitCastingInfo(unit) then
+			self:CastBarOnCast(frame, "UNIT_SPELLCAST_START", unit)
+		elseif UnitChannelInfo(unit) then
+			self:CastBarOnCast(frame, "UNIT_SPELLCAST_CHANNEL_START", unit)
+		end
+	end
+end
+
+function NotPlater:CastBarOnNamePlateRemoved(unit)
+	local frame = nameplateCastUnits[unit]
+	if frame then
+		frame.npCastUnit = nil
+		nameplateCastUnits[unit] = nil
+		-- Hide castbar only if this frame is not the target
+		if frame.castBar and not self:IsTarget(frame) then
+			frame.castBar.casting = nil
+			frame.castBar.channeling = nil
+			frame.castBar:Hide()
+		end
+	end
+end
+
+function NotPlater:RegisterNameplateCastBarEvents(frame)
+	if not npNameplateCastFrame.npEventsHooked then
+		npNameplateCastFrame.npEventsHooked = true
+		npNameplateCastFrame:SetScript("OnEvent", function(self, event, unit)
+			if event == "NAME_PLATE_UNIT_ADDED" then
+				NotPlater:CastBarOnNamePlateAdded(unit)
+			elseif event == "NAME_PLATE_UNIT_REMOVED" then
+				NotPlater:CastBarOnNamePlateRemoved(unit)
+			else
+				-- UNIT_SPELLCAST_* events for nameplate units
+				if not unit or not UnitExists(unit) then
+					return
+				end
+				local npFrame = nameplateCastUnits[unit]
+				if npFrame then
+					NotPlater:CastBarOnCast(npFrame, event, unit)
+				end
+			end
+		end)
+	end
+	npNameplateCastFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
+	npNameplateCastFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+	npNameplateCastFrame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
+	npNameplateCastFrame:RegisterEvent("UNIT_SPELLCAST_DELAYED")
+	npNameplateCastFrame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
+	npNameplateCastFrame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_UPDATE")
+	npNameplateCastFrame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
+	npNameplateCastFrame:RegisterEvent("UNIT_SPELLCAST_START")
+	npNameplateCastFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
+	npNameplateCastFrame:RegisterEvent("UNIT_SPELLCAST_FAILED")
+end
+
+function NotPlater:UnregisterNameplateCastBarEvents(frame)
+	npNameplateCastFrame:UnregisterAllEvents()
+	-- Clear all mappings and frame references
+	for unit, mappedFrame in pairs(nameplateCastUnits) do
+		if mappedFrame then
+			mappedFrame.npCastUnit = nil
+		end
+	end
+	wipe(nameplateCastUnits)
 end

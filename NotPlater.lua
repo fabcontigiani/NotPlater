@@ -7,6 +7,7 @@ NotPlater.clientInterface = CLIENT_INTERFACE
 NotPlater.isWrathClient = IS_WRATH_CLIENT
 NotPlater.revision = "v3.2.4"
 NotPlater.addonName = addonName or NotPlater.addonName or "NotPlater-2.4.3"
+NotPlater.hasNamePlateAPI = (C_NamePlate ~= nil and C_NamePlate.GetNamePlateForUnit ~= nil)
 
 local UnitName = UnitName
 local UnitGUID = UnitGUID
@@ -395,6 +396,7 @@ function NotPlater:PrepareFrame(frame)
 				self.unitClass = nil
 				self.unitClassToken = nil
 				self.unitFaction = nil
+				self.npCastUnit = nil
 				self.highlightTexture:Hide()
 			end)
 		end
@@ -434,11 +436,33 @@ function NotPlater:HookFrames(...)
 	end
 end
 
+function NotPlater:GetFrameForNamePlate(namePlate)
+	if not namePlate then
+		return nil
+	end
+	for frame in pairs(frames) do
+		if frame:IsShown() and frame:GetParent() == namePlate then
+			return frame
+		end
+	end
+	-- Fallback: check if the nameplate itself is a tracked frame
+	if frames[namePlate] then
+		return namePlate
+	end
+	return nil
+end
+
 function NotPlater:Reload()
 	if self.db.profile.castBar.statusBar.general.enable then
 		self:RegisterCastBarEvents(NotPlater.frame)
+		if self.hasNamePlateAPI and self.db.profile.castBar.statusBar.general.showNonTargetCastBars then
+			self:RegisterNameplateCastBarEvents(NotPlater.frame)
+		else
+			self:UnregisterNameplateCastBarEvents(NotPlater.frame)
+		end
 	else
 		self:UnregisterCastBarEvents(NotPlater.frame)
+		self:UnregisterNameplateCastBarEvents(NotPlater.frame)
 	end
 	self:UpdateNameplateCastBarCVar()
 	self:UpdateNameplateClassColorCVar()
